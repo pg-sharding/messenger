@@ -1,0 +1,99 @@
+---
+# SPQR demo: one router in front of two PostgreSQL shards.
+#
+#   docker compose run --rm load    start everything and load the messenger data
+#   docker compose run --rm psql    SQL through the router
+#   docker compose run --rm admin   router admin console
+#   docker compose run --rm drop    remove the demo data and sharding rules
+#   docker compose down -v          stop and delete everything
+
+name: spqr-demo
+
+x-shard: &shard
+  image: ${POSTGRES_IMAGE:-postgres:16-alpine}
+  environment:
+    POSTGRES_USER: demo
+    POSTGRES_DB: demo
+    # Demo only. Ports are published on 127.0.0.1 for the same reason.
+    POSTGRES_HOST_AUTH_METHOD: trust
+  healthcheck:
+    # TCP on purpose: during first-time init postgres listens on the unix
+    # socket only, and we must not call that "ready".
+    test: [CMD-SHELL, pg_isready -h 127.0.0.1 -U demo -d demo]
+    interval: 2s
+    timeout: 3s
+    retries: 30
+
+x-client: &client
+  image: &router-image ${SPQR_IMAGE:-pgsharding/spqr-router:nightly-3.2.2-3007-2c9e6b92}
+  depends_on:
+    router:
+      condition: service_healthy
+  environment: &client-env
+    PGHOST: router
+    PGPORT: '6432'
+    PGUSER: demo
+    PGDATABASE: demo
+  volumes:
+    - ./sql:/sql:ro
+  working_dir: /sql
+
+services:
+  shard1:
+    <<: *shard
+    ports:
+      - 127.0.0.1:${SHARD1_PORT:-5441}:5432
+
+  shard2:
+    <<: *shard
+    ports:
+      - 127.0.0.1:${SHARD2_PORT:-5442}:5432
+
+  router:
+    image: *router-image
+    depends_on:
+      shard1:
+        condition: service_healthy
+      shard2:
+        condition: service_healthy
+    volumes:
+      - ./router.yaml:/etc/spqr/router.yaml:ro
+    # Holds the router's unix socket; a tmpfs so a restart starts clean.
+    tmpfs:
+      - /tmp
+    ports:
+      - 127.0.0.1:${ROUTER_PORT:-6432}:6432
+      - 127.0.0.1:${ADMIN_PORT:-7432}:7432
+    healthcheck:
+      test: [CMD-SHELL, psql -h 127.0.0.1 -p 7432 -U demo -d demo -qAtc 'SHOW shards' >/dev/null]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # One-shot: (re)creates the sharding rules, the schema and the data.
+  # Drops first, so it always ends in the same known state.
+  load:
+    <<: *client
+    entrypoint: [/bin/sh, -ec]
+    command:
+      - |
+        psql -q -f drop.sql >/dev/null
+        psql -q -f messenger.sql
+
+  drop:
+    <<: *client
+    profiles: [tools]
+    entrypoint: [psql, -q, -f, drop.sql]
+
+  psql:
+    <<: *client
+    profiles: [tools]
+    entrypoint: [psql]
+
+  admin:
+    <<: *client
+    profiles: [tools]
+    entrypoint: [psql]
+    environment:
+      <<: *client-env
+      PGPORT: '7432'

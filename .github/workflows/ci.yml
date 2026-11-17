@@ -1,0 +1,50 @@
+---
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # Mondays 05:17 UTC: catch breakage coming from new router builds.
+    - cron: '17 5 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: ./scripts/lint.sh
+
+  test:
+    name: Smoke test (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The image pinned in docker-compose.yml: must pass.
+          - name: pinned router
+            image: ''
+            experimental: false
+          # Today's router build: tells us early, does not block.
+          - name: nightly router
+            image: pgsharding/spqr-router:nightly
+            experimental: true
+    continue-on-error: ${{ matrix.experimental }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Run the demo end to end
+        env:
+          SPQR_IMAGE: ${{ matrix.image }}
+        run: ./scripts/smoke-test.sh

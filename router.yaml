@@ -1,0 +1,39 @@
+---
+# SPQR router config for the demo: one router, two shards, no coordinator.
+# Routing metadata lives in the router's memory, so it is gone after a router
+# restart; `docker compose run --rm load` puts it back.
+# Reference: https://pg-sharding.tech/configuration/router
+
+host: '0.0.0.0'
+router_port: '6432'
+admin_console_port: '7432'
+grpc_api_port: '7000'
+unix_socket_dir: /tmp
+
+router_mode: PROXY
+log_level: info
+
+# Demo only: any user, any database, no password.
+frontend_rules:
+  - pool_default: true
+    pool_mode: TRANSACTION
+    auth_rule:
+      auth_method: ok
+
+backend_rules:
+  - pool_default: true
+    connection_limit: 50
+
+schema_cache_backend_rule:
+  usr: demo
+  db: demo
+
+shards:
+  sh1:
+    type: DATA
+    hosts:
+      - 'shard1:5432'
+  sh2:
+    type: DATA
+    hosts:
+      - 'shard2:5432'
