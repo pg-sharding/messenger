@@ -125,3 +125,5 @@ message counts.
 docker compose exec shard1 psql -U demo -d demo -c 'SELECT min(chat_id), max(chat_id), count(*) FROM messages'
 docker compose exec shard2 psql -U demo -d demo -c 'SELECT min(chat_id), max(chat_id), count(*) FROM messages'
 ```
+
+[Development and dump generation](cmd/readme.md)
